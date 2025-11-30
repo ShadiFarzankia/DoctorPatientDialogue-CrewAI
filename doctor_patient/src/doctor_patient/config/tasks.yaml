@@ -1,17 +1,69 @@
-research_task:
+symptom_task:
+  agent: symptom_agent
   description: >
-    Conduct a thorough research about {topic}
-    Make sure you find any interesting and relevant information given
-    the current year is {current_year}.
-  expected_output: >
-    A list with 10 bullet points of the most relevant information about {topic}
-  agent: researcher
+    You are given the patient's free-text complaint:
 
-reporting_task:
-  description: >
-    Review the context you got and expand each topic into a full section for a report.
-    Make sure the report is detailed and contains any and all relevant information.
+    {{ chief_complaint }}
+
+    1. Call get_candidate_symptoms to get similar acute symptom snippets
+       from historical cases.
+    2. From the tool output, propose up to 5 short symptom options that
+       could apply to this patient. Each option <= 12 words.
+    3. Include an extra option "None of these symptoms".
+    4. Return ONLY a JSON object with one key "symptom_options" which is a
+       list of strings.
   expected_output: >
-    A fully fledged report with the main topics, each with a full section of information.
-    Formatted as markdown without '```'
-  agent: reporting_analyst
+    {"symptom_options": ["...", "...", "..."]}
+
+drug_task:
+  agent: drug_agent
+  description: >
+    The patient has confirmed some symptoms from the list:
+
+    {{ confirmed_symptoms }}
+
+    1. Use get_candidate_drugs to retrieve historical cases with similar
+       symptom patterns and their Drug History.
+    2. From those, extract up to 5 medication names or drug classes that
+       the current patient might recognise.
+    3. Include an extra option "None of these drugs".
+    4. Return ONLY a JSON object with key "drug_options" which is a list
+       of strings.
+  expected_output: >
+    {"drug_options": ["...", "...", "..."]}
+
+orchestrator_task:
+  agent: orchestrator_agent
+  description: >
+    You are the orchestrator.
+
+    INPUTS:
+    - Chief complaint: {{ chief_complaint }}
+    - Confirmed symptoms: {{ confirmed_symptoms }}
+    - Confirmed drugs: {{ confirmed_drugs }}
+
+    CONTEXT FROM OTHER AGENTS:
+    - Output of symptom_task:
+      {{ symptom_task_output }}
+    - Output of drug_task:
+      {{ drug_task_output }}
+
+    1. Call get_similar_cases_for_summary with confirmed symptoms and drugs
+       to inspect similar cases and their Objective + Plan parts.
+    2. Create a short SOAP-style summary with sections:
+       - Subjective (chief complaint + key symptoms)
+       - Objective (what kind of examinations/tests are usually done)
+       - Assessment (leave generic, no diagnosis)
+       - Plan (next steps: physical exam, lab, radiology, booking doctor, etc.)
+    3. Plan must only contain HIGH-LEVEL actions encouraging the patient to
+       see a clinician; no diagnosis or prescriptions.
+
+    Return ONLY a JSON object with key "summary" that contains the markdown
+    text of the final summary.
+  context:
+    - symptom_task
+    - drug_task
+  expected_output: >
+    {"summary": "markdown text here"}
+
+

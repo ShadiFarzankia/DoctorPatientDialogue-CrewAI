@@ -1,68 +1,127 @@
-import sys
-from datetime import datetime
-
 import streamlit as st
-
-# Make sure Python can find the src/ package
-# (when running from project root, this usually isn't needed,
-#  but it's harmless and makes things robust)
-from pathlib import Path
-ROOT_DIR = Path(__file__).resolve().parent
-SRC_DIR = ROOT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from doctor_patient.crew import DoctorPatient  # type: ignore
-
-
-st.set_page_config(
-    page_title="Doctor–Patient Dialogue Crew",
-    layout="wide",
+from src.doctor_patient.crew import (
+    run_symptom_flow,
+    run_drug_flow,
+    run_summary_flow,
 )
 
-st.title("🩺 Doctor–Patient Research Assistant")
+st.set_page_config(page_title="Doctor–Patient Assistant", layout="centered")
 
-st.markdown(
-    """
-This app uses your **CrewAI DoctorPatient crew**:
+st.title("🧪 Doctor–Patient Dialogue Assistant")
+st.caption("Research-only demo. Not medical advice.")
 
-- `researcher` → gathers information about a topic  
-- `reporting_analyst` → turns it into a detailed markdown report  
 
-Fill in the topic and run the crew.
-"""
-)
+# ------------------------------
+# STATE
+# ------------------------------
 
-# Inputs
-default_year = datetime.now().year
-topic = st.text_input(
-    "Topic",
-    placeholder="e.g. Type 2 diabetes lifestyle changes",
-)
-current_year = st.number_input(
-    "Current year",
-    value=default_year,
-    step=1,
-)
+if "step" not in st.session_state:
+    st.session_state.step = 1
+    st.session_state.chief = ""
+    st.session_state.symptom_options = []
+    st.session_state.selected_symptoms = []
+    st.session_state.drug_options = []
+    st.session_state.selected_drugs = []
+    st.session_state.summary = ""
 
-run_button = st.button("🚀 Run crew")
 
-if run_button:
-    if not topic.strip():
-        st.error("Please enter a topic first.")
+def goto(step: int):
+    st.session_state.step = step
+    st.rerun()
+
+
+# ------------------------------
+# STEP 1 – Chief complaint
+# ------------------------------
+
+if st.session_state.step == 1:
+    st.header("Step 1 — Describe your symptoms")
+
+    chief = st.text_area("Your complaint:", value=st.session_state.chief, height=150)
+
+    if st.button("Find possible symptoms"):
+        if chief.strip():
+            st.session_state.chief = chief.strip()
+            with st.spinner("Analyzing..."):
+                st.session_state.symptom_options = run_symptom_flow(chief)
+            goto(2)
+        else:
+            st.warning("Please enter your complaint.")
+
+
+# ------------------------------
+# STEP 2 – Confirm symptoms
+# ------------------------------
+
+elif st.session_state.step == 2:
+    st.header("Step 2 — Select symptoms")
+
+    opts = st.session_state.symptom_options
+    if not opts:
+        st.error("No symptom options found. Try again.")
+        if st.button("Back"):
+            goto(1)
     else:
-        st.info("Running crew… this may take a bit.")
-        with st.spinner("Agents are working..."):
-            crew = DoctorPatient().crew()
-            result = crew.kickoff(
-                inputs={
-                    "topic": topic.strip(),
-                    "current_year": int(current_year),
-                }
+        selected = st.multiselect("Which symptoms apply?", options=opts)
+        none = st.checkbox("None of these")
+
+        if st.button("Continue"):
+            if none:
+                st.session_state.selected_symptoms = []
+            else:
+                st.session_state.selected_symptoms = selected
+
+            with st.spinner("Finding drug history patterns..."):
+                st.session_state.drug_options = run_drug_flow(
+                    st.session_state.chief,
+                    st.session_state.selected_symptoms,
+                )
+            goto(3)
+
+        if st.button("Back"):
+            goto(1)
+
+
+# ------------------------------
+# STEP 3 – Confirm medications
+# ------------------------------
+
+elif st.session_state.step == 3:
+    st.header("Step 3 — Select medications")
+
+    opts = st.session_state.drug_options
+    selected = st.multiselect("Which medications apply?", options=opts)
+    none = st.checkbox("None of these medications")
+
+    if st.button("Generate summary"):
+        if none:
+            st.session_state.selected_drugs = []
+        else:
+            st.session_state.selected_drugs = selected
+
+        with st.spinner("Generating summary..."):
+            st.session_state.summary = run_summary_flow(
+                st.session_state.chief,
+                st.session_state.selected_symptoms,
+                st.session_state.selected_drugs,
             )
+        goto(4)
 
-        st.success("Done!")
+    if st.button("Back"):
+        goto(2)
 
-        st.subheader("📄 Generated Report")
-        # reporting_task is already configured to output markdown
-        st.markdown(result)
+
+# ------------------------------
+# STEP 4 – Summary
+# ------------------------------
+
+elif st.session_state.step == 4:
+    st.header("Step 4 — Summary")
+    st.markdown(st.session_state.summary)
+
+    st.info("This is a research demo. Not medical advice.")
+
+    if st.button("Start over"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
